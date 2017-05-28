@@ -24,8 +24,8 @@
  * A serial USB interface is provided as a secondary control and
  * debugging interface. Errors will be printed to this interface.
  *
- * Version: v1.1
- *    Date: 10/04/2016
+ * Version: v1.2
+ *    Date: 28/05/2017
  *  Author: Mark Broadmeadow
  *  E-mail: mark.broadmeadow@qut.edu.au
  *	Edited: Group 420
@@ -49,13 +49,9 @@
 /* MACROS to use in the code	                                        */
 /************************************************************************/
 #define SET_BIT(byte, bit) (byte |= (1 << bit))
-#define CLEAR_BIT(byte, bit) (byte &= ~(1 << bit))
-#define TOGGLE_BIT(byte, bit) (byte ^= (1 << bit))
 
 //Macros for if conditions//
-
 #define BIT_IS_SET(byte, bit) (byte & (1 << bit))           // check to see if the bit is set or not
-#define BIT_IS_CLEAR(byte, bit) (!(byte & (1 << bit)))      // check to see if the bit is cleared or not
 
 #define TOP 255
 
@@ -77,7 +73,7 @@ volatile uint8_t stop = 0;			// Flag that indicates playback/recording is comple
 
 // Personal global variables
 volatile uint32_t data_amount = 0;
-volatile uint8_t played = 0;
+volatile uint8_t played = 1;
 volatile uint8_t first_que = 0;
 volatile uint8_t second_que = 0;
 volatile uint8_t first_played = 0;
@@ -105,36 +101,27 @@ void clock_init() {
 
 // Initialize buttons and LEDs
 void hardware_setup (){
-	// clear the bit and set the button pins as input (1= output && 0=input)
-	//DDRF &= ~ ((1 << PF4) | (1 << PF5) | (1 << PF6) | (1 << PF7));  
-	//// set the leds as output (1= output && 0=input)
-	//DDRF |= (1 << PD1) | (1 << PD2) | (1 << PD3) | (1 << PD4);     
-	//PORTD &= ~((1 << PD1) | (1 << PD2) | (1 << PD3) | (1 << PD4));    // Turn off all the LEDs
+	// clear the bit and set the button pins as input (1= output && 0=input)		
 	DDRD |= 0b11110000; // LEDS
 	DDRF &= ~0b11110000; // Buttons
 }
 
-// Set PWM with Prescaler 1024 to 61Hz
-void set_pwm() {
-	//Implemented set duty cycle 25%
+void set_pwm() {	
 	OCR4C = TOP;			// set top to 0xFF (255)
-	//TCCR4B = 0x05;				//Prescaler 16, ~15.25kHz
-	TCCR4B = 0x04;				//Prescaler 8
-	//TCCR4B = 0x06;				//Prescaler 32, 
-	//TCCR4A = 0x11;				//set control register for 0C4B
+	
+	TCCR4B = 0x04;				//Prescaler 8, ~32.5kHz	
 	TCCR4A = 0x20;				//set control register for 0C4B
 	OCR4B = 0x80;				// initialize to 50% duty cycle
-	TIMSK4 = 0x00;				// Disable interupt
-	
+	TIMSK4 = 0x00;				// Disable interrupt	
 	DDRB |= 0b01000000;			// set pin B6 to output(JOUT)
 	TCNT4 = 0x00;  // reset counter
 }
 void start_pwm(){
-	TIMSK4 = 0x04;				// Enable interupt
+	TIMSK4 = 0x04;				// Enable interrupt
 	TCCR4A = 0x21;				//set control register for 0C4B
 }
 void stop_pwm(){
-	TIMSK4 = 0x00;				// Disable interupt
+	TIMSK4 = 0x00;				// Disable interrupt
 	TCCR4A = 0x20;				//set control register for 0C4B
 }
 // Initialize DVR subsystems and enable interrupts
@@ -170,17 +157,9 @@ void pageFull() {
 
 // CALLED FROM BUFFER MODULE WHEN A NEW PAGE HAS BEEN EMPTIED
 void pageEmpty() {
-	if (data_amount > 512) {
+	if (data_amount > 2048) {
 		newPage = 1;
-	}
-	/*
-	if(!(--pageCount)) {
-		// If all pages have been read
-		stop = 1;
-	} else {
-		newPage = 1;	// Flag new page is ready to write to SD card
-	}
-	*/
+	}	
 }
 
 /************************************************************************/
@@ -198,61 +177,51 @@ void dvr_record() {
 	adc_start();		// Begin sampling
 
 	SET_BIT (PORTD, PD1); // turn on the first led
-	PORTD &= ~((1 << PD2) | (1 << PD3) | (1 << PD4));    // Turn off  the rest of the LEDs
+	PORTD &= 0b00001111;  // turn other LEDs off
 }
-
-// TODO: Implement code to initiate playback and to stop recording/playback.
 
 /************************************************************************/
 /* MAIN LOOP (CODE ENTRY)                                               */
 /************************************************************************/
 int main(void) {
-	uint8_t state = DVR_STOPPED;	// Start DVR in stopped state
-	
+	uint8_t state = DVR_STOPPED;	// Start DVR in stopped state	
 	// Initialization
 	init();	
-	PORTD |= 0b00010000;  // turn LED1 on
-	PORTD &= 0b00011111;  // turn other LEDs off
+	PORTD &= 0b00001111;  // turn other LEDs off
 	// Loop forever (state machine)
 	stop_pwm();
     for(;;) {		
 		// Switch depending on state
 		switch (state) {
-			case DVR_STOPPED:
-				// TODO: Implement button/LED handling for record/playback/stop
-				// TODO: Implement code to initiate recording
-				// if ( BIT_IS_SET (~PINF, PF4 ) ) {
-				if(~PINF & (1 << 5 ))	  {
-					PORTD |= 0b00100000;  // turn LED2 on
-					PORTD &= 0b00101111;  // turn other LEDs off
+			case DVR_STOPPED:				
+				if ( BIT_IS_SET (~PINF, PF5 ) ) {
+				//if(~PINF & (1 << 5 ))	  {
+					PORTD |= 0b10000000;  // turn LED2 on				
 					
 					printf("Recording started...");	// Output status to console
 					dvr_record();			// Initiate recording
 					state = DVR_RECORDING;	// Transition to "recording" state
 				 }
-				 //if ( BIT_IS_SET (~PINF, PF5 ) ) {
-				 if(~PINF & (1 << 4 ))	  {
+				 if ( BIT_IS_SET (~PINF, PF4 ) ) {
+				 //if(~PINF & (1 << 4 ))	  {
+					 PORTD &= 0b00001111;  // turn all LEDs off
 					 PORTD |= 0b01000000;  // turn LED3 on
-					 PORTD &= 0b01001111;  // turn other LEDs off
+					 
 					 printf("Preparing file\n");	// Output status to console
 					 buffer_reset();
 					 newPage = 0;
-					 data_amount = wave_open ();  //Open the file to read not VOID function					 
-					 //printf("%i", data_amount);
+					 data_amount = wave_open ()*2+1;  //Open the file to read not VOID function
 					 
-					 //wave_read (buffer_readPage(), 512); //2 is the number of counts
-					 //wave_read (buffer_readPage(), 512); //2 is the number of counts
 					 wave_read (buffer_writePage(), 512); //2 is the number of counts
 					 wave_read (buffer_writePage(), 512); //2 is the number of counts
 					 start_pwm();					 
 					 state = DVR_PLAYING;	// Transition to "recording" state
 				 }
 				break;
-			case DVR_RECORDING:
-				// TODO: Implement stop functionality
+			case DVR_RECORDING:				
 				if ( BIT_IS_SET (~PINF, PF6) ) {
-					PORTD |= 0b00010000;  // turn LED1 on
-					PORTD &= 0b00011111;  // turn other LEDs off					
+					PORTD &= 0b00001111;  // turn all LEDs off
+					PORTD |= 0b00010000;  // turn LED1 on					
 					pageCount = 1;	// Finish recording last page									
 				}
 			
@@ -273,20 +242,19 @@ int main(void) {
 				PORTB |= 0b01000000;
 				
 				if ( BIT_IS_SET (~PINF, PF6) ) {
+					PORTD &= 0b00001111;  // turn other LEDs off
 					PORTD |= 0b00010000;  // turn LED1 on
-					PORTD &= 0b00011111;  // turn other LEDs off					
+					
 					stop = 1;
-					stop_pwm();
-				}				
-				////pwm_state();
-				if(newPage){
 					newPage = 0;
-					//wave_read(buffer_readPage(), 512); //2 is the number of counts
+					stop_pwm();
+				}								
+				if(newPage){
+					newPage = 0;					
 					wave_read (buffer_writePage(), 512); //2 is the number of counts
 				}
 				else if(stop) {
-					stop = 0;
-					//wave_read(buffer_readPage(),512)
+					stop = 0;					
 					wave_close (); // close the file after reading
 					printf("DONE!");
 					state = DVR_STOPPED;				// Transition to stopped state
@@ -306,17 +274,18 @@ int main(void) {
 }
 
 /**
- * ISR: ADC conversion complete
+ * ISR: PWM conversion complete
  * 
- * Interrupt service routine which executes on completion of ADC conversion.
  */
 ISR(TIMER4_OVF_vect) {
+	// 	
 	if(--data_amount > 0){		
 		if(played){
 			first_que = buffer_dequeue();
-			second_que = buffer_dequeue();
+			second_que = buffer_dequeue();				
 			first_played = 0;
 			second_played = 0;
+			played = 0;
 		} else {
 			if(!first_played) {
 				OCR4B = first_que;
@@ -331,7 +300,8 @@ ISR(TIMER4_OVF_vect) {
 			}
 		}	
 	} else {
+		newPage = 0;
 		stop = 1;
-		stop_pwm();	
+		stop_pwm();			
 	}
 }
