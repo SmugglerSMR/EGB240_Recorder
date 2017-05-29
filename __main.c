@@ -24,13 +24,14 @@
  * A serial USB interface is provided as a secondary control and
  * debugging interface. Errors will be printed to this interface.
  *
- * Version:				v1.4
+ * Version:				v1.3
  *    Date:				28/05/2017
  *  Author:				Mark Broadmeadow
  *  E-mail:				mark.broadmeadow@qut.edu.au
  *	Edited:				Group 420
  *	GitHub Repository:	https://github.com/SmugglerSMR/EGB240_Recorder/
  */  
+
 /************************************************************************/
 /* INCLUDED LIBRARIES/HEADER FILES                                      */
 /************************************************************************/
@@ -82,9 +83,6 @@ volatile uint8_t first_que = 0;		// First sample
 volatile uint8_t second_que = 0;	// Next sample
 volatile uint8_t first_played = 0;	// Flag indicates if first sample was played
 volatile uint8_t second_played = 0;	// Flag indicates if second sample was played
-volatile int count = 0;				// Flag indicates skip every second interupt
-
-volatile int debaunce_counter = 0;				// Flag indicates skip every second interupt
 /************************************************************************/
 /* FUNCTION PROTOTYPES                                                  */
 /************************************************************************/
@@ -116,8 +114,7 @@ void hardware_setup (){
 // Initialize PWM state. Sets Prescaler to 8
 void set_pwm() {	
 	OCR4C = TOP;				// Set top to 0xFF (255)	
-	//TCCR4B = 0x04;				// Prescaler 8, ~32.5kHz
-	TCCR4B = 0x03;				// Prescaler 4, ~62kHz	
+	TCCR4B = 0x04;				// Prescaler 8, ~32.5kHz	
 	TCCR4A = 0x20;				// Set control register for 0C4B Off
 	OCR4B = 0x80;				// Initialize to 50% duty cycle
 	TIMSK4 = 0x00;				// Disable interrupt	
@@ -167,7 +164,7 @@ void pageFull() {
 
 // CALLED FROM BUFFER MODULE WHEN A NEW PAGE HAS BEEN EMPTIED
 void pageEmpty() {
-	if (data_amount > (6*pageSize)) {	// If Data reached final 2 page
+	if (data_amount > (4*pageSize)) {	// If Data reached final 2 page
 		newPage = 1;
 	}	
 }
@@ -190,6 +187,12 @@ void dvr_record() {
 	PORTD &= 0b00001111;		// turn other LEDs off
 }
 
+// Debounce button
+void debounce(int p){
+	_delay_ms(50);
+	while(PINF >> p & 0b1);
+	_delay_ms(50);
+}
 
 /************************************************************************/
 /* MAIN LOOP (CODE ENTRY)                                               */
@@ -204,9 +207,7 @@ int main(void) {
     for(;;) {		
 		// Switch depending on state
 		switch (state) {
-			case DVR_STOPPED:
-				PORTD &= 0b00001111;					// Turn all LEDs off
-				PORTD |= 0b01000000;					// Turn LED 3				
+			case DVR_STOPPED:				
 				if ( BIT_IS_SET (~PINF, PF5 ) ) {			// -----STARTING THE RECORDING----
 					PORTD |= 0b10000000;					// Turn LED2 on				
 					
@@ -216,12 +217,12 @@ int main(void) {
 				 }											// -------------------------------
 				 if ( BIT_IS_SET (~PINF, PF4 ) ) {			// -------STARTING PLAYBACK-------
 				 	 PORTD &= 0b00001111;					// Turn all LEDs off
-					 //PORTD |= 0b01000000;					// turn LED3 on
-					 PORTD |= 0b00010000;					// turn LED1 on
+					 PORTD |= 0b01000000;					// turn LED3 on
+					 
 					 printf("Preparing file\n");			// Output status to console
 					 buffer_reset();
 					 newPage = 0;
-					 data_amount = wave_open ()*4+1;		// Open the file to read not VOID function
+					 data_amount = wave_open ()*2+1;		// Open the file to read not VOID function
 					 
 					 wave_read (buffer_writePage(),
 											   pageSize);   // Feel first page with samples
@@ -232,7 +233,7 @@ int main(void) {
 				 }											// ----------------------------------
 				break;
 			case DVR_RECORDING:
-				PORTD |= 0b00100000;						// Keeps LED2 turn on
+				PORTD |= 0b10000000;						// Keeps LED2 turn on
 				if ( BIT_IS_SET (~PINF, PF6) ) {			// --- STOP REcording on Button Press--
 					PORTD &= 0b00001111;					// Turn all LEDs off
 					PORTD |= 0b00010000;					// Turn LED1 on					
@@ -248,7 +249,7 @@ int main(void) {
 												 pageSize);	// Write final page
 					wave_close();							// Finalize WAVE file 
 					printf("Recording COMPLETE!\n");		// Print status to console
-					while(BIT_IS_SET (~PINF, PF5 ));
+					debunce(PF5);				//===========Test debouncing=======================
 					state = DVR_STOPPED;					// Transition to stopped state
 				}											// --------------------------------------------------------
 				break;
@@ -269,11 +270,10 @@ int main(void) {
 												pageSize);  // Writes next page
 				}											//---------------------------
 				else if(stop) {								//---- Finalize Playback------
-					
 					stop = 0;					
 					wave_close ();							// close the file after reading
 					printf("DONE!");
-					while(BIT_IS_SET (~PINF, PF4 ));
+					debunce(PF4);				//===========Test debouncing=======================
 					state = DVR_STOPPED;					// Transition to stopped state
 				}											//-----------------------------
 				
@@ -296,31 +296,25 @@ int main(void) {
  * Creates an average value to fill space. (var1+var2)/2 RUns per 3 sample
  */
 ISR(TIMER4_OVF_vect) {
-	debaunce_counter++;
-	if(--data_amount > 0){
-		count++;
-		if(count >=2) {
-			count = 0;
-			if(played){										// True if 2 samples has not been played yet.
-				first_que = buffer_dequeue();				// Stores first value
-				second_que = buffer_dequeue();				// Stores second value
-				first_played = 0;							// Sets flag for first
-				second_played = 0;							// Sets flag for second
-				played = 0;									// Values are stored, start play
-				} else {										// ------Plays samples of creates one--------
-				if(!first_played) {							// ------Play first sample-------------------
-					OCR4B = first_que;
-					first_played = 1;
-				} else if(!second_played) {					// ------Play average sample-----------------
-					OCR4B = (first_que+second_que)/2.0;
-					second_played = 1;
-				} else {									// ------Play second sample-------------------
-					OCR4B = second_que;
-					played = 1;
-				}											// --------------------------------------------
-			}
-		}								// -----Runs until all samples were played
-														// --------------------------------------------
+	if(--data_amount > 0){								// -----Runs until all samples were played
+		if(played){										// True if 2 samples has not been played yet.		
+			first_que = buffer_dequeue();				// Stores first value
+			second_que = buffer_dequeue();				// Stores second value
+			first_played = 0;							// Sets flag for first
+			second_played = 0;							// Sets flag for second
+			played = 0;									// Values are stored, start play
+		} else {										// ------Plays samples of creates one--------
+			if(!first_played) {							// ------Play first sample-------------------
+				OCR4B = first_que;
+				first_played = 1;
+			} else if(!second_played) {					// ------Play average sample-----------------
+				OCR4B = (first_que+second_que)/2.0;
+				second_played = 1;
+			} else {									// ------Play second sample-------------------
+				OCR4B = second_que;				
+				played = 1;
+			}											// --------------------------------------------
+		}												// --------------------------------------------
 	} else {											// ----- File has been played------------------
 		newPage = 0;									// Empties the page
 		stop = 1;										// Stops playback run
