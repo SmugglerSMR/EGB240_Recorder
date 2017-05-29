@@ -187,6 +187,13 @@ void dvr_record() {
 	PORTD &= 0b00001111;		// turn other LEDs off
 }
 
+// Debounce button
+void debounce(int p){
+	_delay_ms(50);
+	while(PINF >> p & 0b1);
+	_delay_ms(50);
+}
+
 /************************************************************************/
 /* MAIN LOOP (CODE ENTRY)                                               */
 /************************************************************************/
@@ -242,6 +249,7 @@ int main(void) {
 												 pageSize);	// Write final page
 					wave_close();							// Finalize WAVE file 
 					printf("Recording COMPLETE!\n");		// Print status to console
+					debunce(PF5);				//===========Test debouncing=======================
 					state = DVR_STOPPED;					// Transition to stopped state
 				}											// --------------------------------------------------------
 				break;
@@ -264,7 +272,8 @@ int main(void) {
 				else if(stop) {								//---- Finalize Playback------
 					stop = 0;					
 					wave_close ();							// close the file after reading
-					printf("DONE!");						
+					printf("DONE!");
+					debunce(PF4);				//===========Test debouncing=======================
 					state = DVR_STOPPED;					// Transition to stopped state
 				}											//-----------------------------
 				
